@@ -42,7 +42,8 @@ extern void channel_np_connect(PeerServer * server, ChannelConnectCallBack callb
  */
 extern void generate_ssl_certificate(void);
 
-extern void ini_np_channel(void);
+extern int parse_socks_v5_proxy(const char * proxy);
+extern void ini_np_channel();
 
 #endif /* D_channel_np */
 #endif /* ENABLE_WebSocket */

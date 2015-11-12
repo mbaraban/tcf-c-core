@@ -152,6 +152,8 @@ int           __nopoll_conn_send_common (noPollConn * conn,
 
 nopoll_bool      nopoll_conn_wait_until_connection_ready (noPollConn * conn,
 							  int          timeout);
+void            nopoll_conn_set_socks_v5_proxy (const char * host, 
+                                                const char * port);
 
 /** internal api **/
 void nopoll_conn_complete_handshake (noPollConn * conn);

@@ -277,6 +277,9 @@ int main(int argc, char ** argv) {
     const char * log_name = NULL;
     const char * log_level = NULL;
 #endif
+#if ENABLE_WebSocket_SOCKS_V5
+    const char * socks_v5_proxy = NULL;
+#endif
     int interactive = 0;
     int print_server_properties = 0;
     const char * url = NULL;
@@ -367,6 +370,9 @@ int main(int argc, char ** argv) {
                 show_help();
                 exit(0);
 
+#if ENABLE_WebSocket_SOCKS_V5
+            case 'p':
+#endif
             case 'I':
 #if ENABLE_Trace
             case 'l':
@@ -406,6 +412,11 @@ int main(int argc, char ** argv) {
 #if ENABLE_Plugins
                 case 'P':
                     plugins_path = s;
+                    break;
+#endif
+#if ENABLE_WebSocket_SOCKS_V5
+                case 'p':
+                    socks_v5_proxy = s;
                     break;
 #endif
                 }
@@ -448,6 +459,12 @@ int main(int argc, char ** argv) {
 #endif
 
 #if ENABLE_WebSocket
+#if ENABLE_WebSocket_SOCKS_V5
+    if (parse_socks_v5_proxy(socks_v5_proxy) != 0) {
+        fprintf(stderr, "Cannot parse SOCKS V5 proxy string: %s\n", socks_v5_proxy);
+        exit(1);
+    }
+#endif
     ini_np_channel();
 #endif
     ini_services(proto, bcg);

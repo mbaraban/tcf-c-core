@@ -77,6 +77,11 @@
 #  endif
 #endif
 
+#if ENABLE_WebSocket_SOCKS_V5
+static char * socks_v5_host = NULL;
+static char * socks_v5_port = NULL;
+#endif
+
 
 typedef struct ChannelNP ChannelNP;
 
@@ -1000,6 +1005,11 @@ static void ini_nopoll() {
                     local_mutex_destroy,
                     local_mutex_lock,
                     local_mutex_unlock);
+#if ENABLE_WebSocket_SOCKS_V5
+    if (socks_v5_host != NULL) {
+        nopoll_conn_set_socks_v5_proxy(socks_v5_host, socks_v5_port);
+    }
+#endif
     np_poll_initialized = 1;
 }
 
@@ -1218,6 +1228,24 @@ void channel_np_connect(PeerServer * ps, ChannelConnectCallBack callback, void *
         async_req_post(&info->req);
     }
 }
+
+#if ENABLE_WebSocket_SOCKS_V5
+int parse_socks_v5_proxy(const char * proxy) {
+    int error = 0;
+    if (proxy != NULL) {
+        const char * str;
+        str = strchr(proxy, ':');
+        if (str == NULL || strchr (str + 1, ':') != NULL) {
+            error = set_errno (ERR_OTHER, "Invalid format for SocksV5 WebSocket proxy");
+            return -1;
+        }
+        socks_v5_host = loc_alloc_zero(str - proxy + 1);
+        strncpy(socks_v5_host, proxy, str - proxy);
+        socks_v5_port = loc_strdup(str + 1);
+    }
+    return 0;
+}
+#endif  /* ENABLE_WebSocket_SOCKS_V5 */
 
 void ini_np_channel() {
     add_channel_transport("WS", channel_np_server, channel_np_connect);

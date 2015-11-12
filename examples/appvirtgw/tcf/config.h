@@ -52,6 +52,9 @@
 #if !defined(ENABLE_WebSocket)
 #  define ENABLE_WebSocket      1
 #endif
+#if !defined(ENABLE_WebSocket_SOCKS_V5)
+#  define ENABLE_WebSocket_SOCKS_V5      1
+#endif
 
 #define SERVICE_MemoryMap       0
 #define SERVICE_StackTrace      0

@@ -53,6 +53,28 @@
 # include <netinet/tcp.h>
 #endif
 
+static const char * socks_v5_host;
+static const char * socks_v5_port;
+
+/** 
+ * @brief Allows to configure a SOCKS V5 proxy
+ * 
+ * This function allows to configure a SOCKS V5 proxy 
+ *
+ * @param host host name of the SOCKS V5 proxy
+ *
+ * @param port SOCKS V5 proxy port number
+ */
+void               nopoll_conn_set_socks_v5_proxy        (const char * host, 
+                                                         const char * port)
+{
+	socks_v5_host = host;
+	socks_v5_port = port;
+        if (socks_v5_host != NULL && socks_v5_port == NULL) {
+                socks_v5_port = "1080";
+        }
+}
+
 /** 
  * @brief Allows to enable/disable non-blocking/blocking behavior on
  * the provided socket.
@@ -191,6 +213,179 @@ nopoll_bool                 nopoll_conn_set_sock_tcp_nodelay   (NOPOLL_SOCKET so
 	/* properly configured */
 	return nopoll_true;
 } /* end */
+
+static int __nopoll_conn_wait(NOPOLL_SOCKET session, int read, long timeout_us) {
+        fd_set           read_fds;
+        fd_set           write_fds;
+        fd_set           err_fds;
+        struct timeval   timeout = {0};
+
+        FD_ZERO(&write_fds);
+        FD_ZERO(&read_fds);
+        FD_ZERO(&err_fds);
+        FD_SET(session, read ? &read_fds : &write_fds);
+
+        timeout.tv_usec = timeout_us % 1000000;
+        timeout.tv_sec = timeout_us / 1000000;
+
+        if (select(session+1, &read_fds, &write_fds, &err_fds, &timeout) <= 0) {
+                return -1;
+        }
+        if (!FD_ISSET(session, read ? &read_fds : &write_fds)) {
+                return -1;
+        }
+        return 0;
+}
+
+/** 
+ * @internal Allows to create a plain socket connection against the
+ * host and port provided throuh a Socks V5 proxy.
+ *
+ * @param ctx The context where the connection happens.
+ *
+ * @param host The host server to connect to.
+ *
+ * @param port The port server to connect to.
+ *
+ * @return A connected socket or -1 if it fails. 
+ */
+NOPOLL_SOCKET nopoll_conn_sock_socks_v5_connect (noPollCtx   * ctx,
+					const char  * host,
+					const char  * port)
+{
+	struct hostent     * hostent;
+	struct sockaddr_in   saddr;
+	NOPOLL_SOCKET        session;
+        unsigned char        buffer[256];
+        int                  rval;
+        int                  ix;
+        uint16_t             sin_port;
+
+	/* resolve hosting name */
+	hostent = gethostbyname (socks_v5_host);
+	if (hostent == NULL) {
+		nopoll_log (ctx, NOPOLL_LEVEL_DEBUG, "unable to resolve host name %s", host);
+		return -1;
+	} /* end if */
+
+	/* create the socket and check if it */
+	session      = socket (AF_INET, SOCK_STREAM, 0);
+	if (session == NOPOLL_INVALID_SOCKET) {
+		nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "unable to create socket");
+		return -1;
+	} /* end if */
+
+	/* disable nagle */
+	nopoll_conn_set_sock_tcp_nodelay (session, nopoll_true);
+
+	/* prepare socket configuration to operate using TCP/IP
+	 * socket */
+        memset(&saddr, 0, sizeof(saddr));
+	saddr.sin_addr.s_addr = ((struct in_addr *)(hostent->h_addr))->s_addr;
+        saddr.sin_family    = AF_INET;
+        saddr.sin_port      = htons((uint16_t) strtod (socks_v5_port, NULL));
+
+	/* set non blocking status */
+	nopoll_conn_set_sock_block (session, nopoll_false);
+	
+	/* do a tcp connect */
+        if (connect (session, (struct sockaddr *)&saddr, sizeof(saddr)) < 0) {
+		if(errno != NOPOLL_EINPROGRESS && errno != NOPOLL_EWOULDBLOCK) { 
+		        shutdown (session, SHUT_RDWR);
+                        nopoll_close_socket (session);
+
+			nopoll_log (ctx, NOPOLL_LEVEL_WARNING, "unable to connect to remote host %s:%s errno=%d",
+				    host, port, errno);
+			return -1;
+		} /* end if */
+	} /* end if */
+
+        /* wait for the connection to be succesfull */
+        if (__nopoll_conn_wait(session, 0, ctx->conn_connect_std_timeout) != 0) {
+                nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Unable to connect to SOCKS V5 server.");
+                shutdown (session, SHUT_RDWR);
+                nopoll_close_socket (session);
+                return 01;
+        }
+
+	nopoll_conn_set_sock_block (session, nopoll_true);
+
+        buffer[0] = 5;         /* socks protocol version 5 */
+        buffer[1] = 1;         /* supporting 1 auth method */
+        buffer[2] = 0;         /* Null authentication */
+
+
+        if ((rval = send(session, buffer, 3, 0)) != 3) {
+                shutdown (session, SHUT_RDWR);
+                nopoll_close_socket (session);
+                return -1;
+        }
+
+        rval = recv(session, buffer, 2, 0);
+        if (rval != 2) {
+                shutdown (session, SHUT_RDWR);
+                nopoll_close_socket (session);
+                return -1;
+        }
+
+        if (buffer[0] != 0x5) {
+                nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Not a SOCKS V5 server.");
+                shutdown (session, SHUT_RDWR);
+                nopoll_close_socket (session);
+		return -1;
+        }
+
+        if (buffer[1] == 0xff) {
+                nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Socks V5 server has not supported authentication methods\n");
+                shutdown (session, SHUT_RDWR);
+                nopoll_close_socket (session);
+                return -1;
+        }
+
+        if ((unsigned short int) buffer[1] != 0) {
+                nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL,  "Socks V5 server does not accept non autenticated connection\n");
+                shutdown (session, SHUT_RDWR);
+                nopoll_close_socket (session);
+                return -1;
+            }
+
+	/* resolve hosting name */
+	hostent = gethostbyname (host);
+	if (hostent == NULL) {
+		nopoll_log (ctx, NOPOLL_LEVEL_DEBUG, "unable to resolve host name %s", host);
+		return -1;
+	} /* end if */
+
+        ix = 0;
+        buffer[ix++] = 5;  /* socks version */
+        buffer[ix++] = 1;  /* CONNECT command */
+        buffer[ix++] = 0;
+
+        buffer[ix++] = 1;  /* IPv4 */
+        memcpy(&buffer[ix], ((struct in_addr *)(hostent->h_addr)), sizeof(struct in_addr));
+        ix += sizeof(struct in_addr);
+        sin_port = htons((uint16_t) strtod (port, NULL));
+        buffer[ix++] = (sin_port & 0xFF);
+        buffer[ix++] = (sin_port >> 8);
+
+        rval = send(session, buffer, ix, 0);
+        if (rval != ix) {
+                shutdown (session, SHUT_RDWR);
+                nopoll_close_socket (session);
+                return -1;
+        }
+        rval = recv(session, buffer, sizeof(buffer), 0);
+        if (rval < 2 || buffer[0] != 5 || buffer[1] != 0) {
+                nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "SOCKS V5 connection failed.");
+                shutdown (session, SHUT_RDWR);
+                nopoll_close_socket (session);
+		return -1;
+        }
+
+	nopoll_conn_set_sock_block (session, nopoll_false);
+	/* return socket created */
+	return session;
+}
 
 /** 
  * @internal Allows to create a plain socket connection against the
@@ -341,29 +536,6 @@ int nopoll_conn_log_ssl (noPollConn * conn)
 	
 	
 	return (0);
-}
-
-static int __nopoll_conn_wait(NOPOLL_SOCKET session, int read, long timeout_us) {
-        fd_set           read_fds;
-        fd_set           write_fds;
-        fd_set           err_fds;
-        struct timeval   timeout = {0};
-
-        FD_ZERO(&write_fds);
-        FD_ZERO(&read_fds);
-        FD_ZERO(&err_fds);
-        FD_SET(session, read ? &read_fds : &write_fds);
-
-        timeout.tv_usec = timeout_us % 1000000;
-        timeout.tv_sec = timeout_us / 1000000;
-
-        if (select(session+1, &read_fds, &write_fds, &err_fds, &timeout) <= 0) {
-                return -1;
-        }
-        if (!FD_ISSET(session, read ? &read_fds : &write_fds)) {
-                return -1;
-        }
-        return 0;
 }
 
 int __nopoll_conn_tls_handle_error (noPollConn * conn, int res, const char * label, nopoll_bool * needs_retry)
@@ -538,22 +710,33 @@ noPollConn * __nopoll_conn_new_common (noPollCtx       * ctx,
 	if (host_port == NULL)
 		host_port = "80";
 
-	/* create socket connection in a non block manner */
-	session = nopoll_conn_sock_connect (ctx, host_ip, host_port);
-	if (session == NOPOLL_INVALID_SOCKET) {
-		/* release connection options */
-		__nopoll_conn_opts_release_if_needed (options);
-		nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Failed to connect to remote host %s:%s", host_ip, host_port);
-		return NULL;
-	} /* end if */
+        if (socks_v5_host == NULL) {
+                /* create socket connection in a non block manner */
+                session = nopoll_conn_sock_connect (ctx, host_ip, host_port);
+                if (session == NOPOLL_INVALID_SOCKET) {
+                        /* release connection options */
+                        __nopoll_conn_opts_release_if_needed (options);
+                        nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Failed to connect to remote host %s:%s", host_ip, host_port);
+                        return NULL;
+                } /* end if */
 
-        /* wait for the connection to be succesfull */
-        if (__nopoll_conn_wait(session, 0, ctx->conn_connect_std_timeout) != 0) {
-                nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Unable to connect to server.");
-                shutdown (session, SHUT_RDWR);
-                nopoll_close_socket (session);
-		__nopoll_conn_opts_release_if_needed (options);
-		return NULL;
+                /* wait for the connection to be succesfull */
+                if (__nopoll_conn_wait(session, 0, ctx->conn_connect_std_timeout) != 0) {
+                        nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Unable to connect to server.");
+                        shutdown (session, SHUT_RDWR);
+                        nopoll_close_socket (session);
+                        __nopoll_conn_opts_release_if_needed (options);
+                        return NULL;
+                }
+        }
+        else {
+                session = nopoll_conn_sock_socks_v5_connect (ctx, host_ip, host_port);
+                if (session == NOPOLL_INVALID_SOCKET) {
+                        /* release connection options */
+                        __nopoll_conn_opts_release_if_needed (options);
+                        nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "Failed to connect to remote host %s:%s through SOCKS V5 proxy %s:%s", host_ip, host_port, "localhost", "1080");
+                        return NULL;
+                } /* end if */
         }
 
 	/* create the connection */
