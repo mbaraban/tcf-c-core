@@ -103,14 +103,16 @@
 /* Hook for USAGE string */
 #ifndef USAGE_STRING_HOOK
 #define USAGE_STRING_HOOK                               \
-    "Usage: agent [OPTION]...",                         \
+    "Usage: device [OPTION]...",                         \
     "Start Target Communication Framework agent."
 #endif
 
 static const char * progname;
 static unsigned int idle_timeout;
 static unsigned int idle_count;
-static const char * dev_url;
+static const char * dev_cfg;
+
+static void device_register(const char * dev_cfg);
 
 static void check_idle_timeout(void * args) {
     if (list_is_empty(&channel_root)) {
@@ -204,7 +206,6 @@ static const char * help_text[] = {
 #if ENABLE_SSL
     "  -c               generate SSL certificate and exit",
 #endif
-    "  -device <device> add gateway device specified by <device> string",
     HELP_TEXT_HOOK
     NULL
 };
@@ -228,6 +229,79 @@ static void show_help(void) {
     }
 }
 #endif
+static void device_register_cb(void * dev_cfg) {
+    device_register((const char *)dev_cfg);
+}
+
+static void device_register(const char * dev_cfg) {
+    const char * user = NULL;
+    const char * platform = NULL;
+    const char * id = NULL;
+    char * dev_url = NULL;
+    const char * s;
+    int err = 0;
+
+    if (strncmp(dev_cfg, "file:", strlen("file:")) == 0) {
+        struct stat st;
+        const char * dev_file = dev_cfg + strlen("file:");
+        FILE * fp = NULL;
+
+        if (stat(dev_file, &st) == 0 &&
+            ((fp = fopen(dev_file, "r")) != NULL)) 
+            {
+            dev_url = loc_alloc_zero(st.st_size + 1);
+            fgets(dev_url, st.st_size, fp);
+            if (strlen(dev_url) == 0) {
+                loc_free(dev_url);
+                dev_url = NULL;
+            }
+        }
+        if (fp != NULL) fclose(fp);
+        if (err) {
+            loc_free(dev_url);
+            dev_url = NULL;
+        }
+    }
+    else dev_url = loc_strdup(dev_cfg);
+
+    if (dev_url == NULL) return post_event_with_delay(device_register_cb, (void *)dev_cfg, 1000000);
+
+    s = (const char *) dev_url;
+    printf ("s = X%sX", s);
+    while (*s) {
+        while (*s && *s != ';') s++;
+        if (*s == ';') {
+            char * name;
+            char * value;
+            const char * url;
+            s++;
+            url = s;
+            while (*s && *s != '=') s++;
+            if (*s != '=' || s == url) {
+                s = url - 1;
+                break;
+            }
+            name = loc_strndup(url, s - url);
+            s++;
+            url = s;
+            while (*s && *s != ';') s++;
+            value = loc_strndup(url, s - url);
+            if (strcmp(name, "User") == 0) {
+                user = value;
+            } else if (strcmp(name, "Platform") == 0) {
+                platform = value;
+            } else if (strcmp(name, "ID") == 0) {
+                id = value;
+            } else loc_free(value);
+            loc_free(name);
+        }
+    }
+    deviceRegister(dev_url, user, id, platform);
+    loc_free(user);
+    loc_free(id);
+    loc_free(platform);
+    loc_free(dev_url);
+}
 
 static void channel_redirection_listener(Channel * host, Channel * target) {
     if (target->state == ChannelStateConnected) {
@@ -282,9 +356,6 @@ int main(int argc, char ** argv) {
     const char * url = NULL;
     Protocol * proto;
     TCFBroadcastGroup * bcg;
-    char ** gateway_devices = NULL;
-    int gateway_devices_max = 0;
-    int gateway_devices_cnt = 0;
 
     PRE_INIT_HOOK;
     ini_mdep();
@@ -325,21 +396,6 @@ int main(int argc, char ** argv) {
                 exit(0);
                 break;
 
-            case 'd':
-                if (strcmp(s - 1, "device") == 0) {
-                    if (++ind >= argc) {
-                        fprintf(stderr, "%s: error: no argument given to option '%s'\n", progname, s - 1);
-                        exit(1);
-                    }
-                    s = argv[ind];
-                    if (gateway_devices_cnt + 1 > gateway_devices_max) {
-                        gateway_devices_max++;
-                        gateway_devices = loc_realloc(gateway_devices, gateway_devices_max * sizeof(char *));
-                    }
-                    gateway_devices[gateway_devices_cnt++] = s;
-                    s = NULL;
-                    break;
-                }
 #if defined(_WIN32) || defined(__CYGWIN__)
                 /* For Windows the only way to detach a process is to
                  * create a new process, so we patch the -d option to
@@ -422,7 +478,7 @@ int main(int argc, char ** argv) {
     }
 
     if (ind < argc) {
-        dev_url = argv[ind++];
+        dev_cfg = argv[ind++];
     }
 
     POST_OPTION_HOOK;
@@ -486,78 +542,8 @@ int main(int argc, char ** argv) {
             loc_free(server_properties);
         }
     }
-    if (dev_url && gateway_devices_cnt == 0) {
-        const char * user = NULL;
-	const char * platform = NULL;
-	const char * id = NULL;
 
-        const char * s = dev_url;
-	while (*s) {
-	    while (*s && *s != ';') s++;
-	    if (*s == ';') {
-	        char * name;
-		char * value;
-		const char * url;
-		s++;
-		url = s;
-		while (*s && *s != '=') s++;
-		if (*s != '=' || s == url) {
-		    s = url - 1;
-		    break;
-		}
-		name = loc_strndup(url, s - url);
-		s++;
-		url = s;
-		while (*s && *s != ';') s++;
-		value = loc_strndup(url, s - url);
-		if (strcmp(name, "User") == 0) {
-		    user = value;
-		} else if (strcmp(name, "Platform") == 0) {
-		    platform = value;
-		} else if (strcmp(name, "ID") == 0) {
-		    id = value;
-		} else loc_free(value);
-		loc_free(name);
-	    }
-	}
-	deviceRegister(dev_url, user, id, platform);
-	loc_free(user);
-	loc_free(id);
-	loc_free(platform);
-    }	
-
-    if (dev_url && gateway_devices_cnt > 0) {
-	const char * id = NULL;
-        const char * s = dev_url;
-	while (*s) {
-	    while (*s && *s != ';') s++;
-	    if (*s == ';') {
-	        char * name;
-		char * value;
-		const char * url;
-		s++;
-		url = s;
-		while (*s && *s != '=') s++;
-		if (*s != '=' || s == url) {
-		    s = url - 1;
-		    break;
-		}
-		name = loc_strndup(url, s - url);
-		s++;
-		url = s;
-		while (*s && *s != ';') s++;
-		value = loc_strndup(url, s - url);
-		if (strcmp(name, "ID") == 0) {
-		    id = value;
-		} else loc_free(value);
-		loc_free(name);
-	    }
-	}
-        gateway_devices = loc_realloc(gateway_devices, (gateway_devices_cnt + 1) * sizeof(char *));
-        gateway_devices[gateway_devices_cnt] = NULL;
-	gatewayRegister(dev_url, id, (const char **) gateway_devices);
-        loc_free(id);
-    }
+    if (dev_cfg) device_register(dev_cfg);
 
     PRE_DAEMON_HOOK;
 #if !defined(_WRS_KERNEL)
