@@ -24,6 +24,7 @@
 #include <tcf/framework/channel.h>
 
 #if ENABLE_WebSocket
+
 /*
  * Start TCP (Internet) channel listener.
  * On error returns NULL and sets errno.
@@ -37,13 +38,9 @@ extern ChannelServer * channel_np_server(PeerServer * server);
  */
 extern void channel_np_connect(PeerServer * server, ChannelConnectCallBack callback, void * callback_args);
 
-/*
- * Generate SSL certificate to be used with SSL channels.
- */
-extern void generate_ssl_certificate(void);
-
 extern int parse_socks_v5_proxy(const char * proxy);
-extern void ini_np_channel();
 
-#endif /* D_channel_np */
+extern void ini_np_channel(void);
+
 #endif /* ENABLE_WebSocket */
+#endif /* D_channel_np */
