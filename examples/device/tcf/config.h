@@ -319,6 +319,10 @@
 #  define ENABLE_WebSocket      1
 #endif
 
+#if !defined(ENABLE_WebSocket_SOCKS_V5)
+#  define ENABLE_WebSocket_SOCKS_V5      1
+#endif
+
 #if !defined(ENABLE_Cmdline)
 #  define ENABLE_Cmdline        1
 #endif
