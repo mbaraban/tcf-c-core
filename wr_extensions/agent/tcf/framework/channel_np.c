@@ -1231,12 +1231,11 @@ void channel_np_connect(PeerServer * ps, ChannelConnectCallBack callback, void *
 
 #if ENABLE_WebSocket_SOCKS_V5
 int parse_socks_v5_proxy(const char * proxy) {
-    int error = 0;
     if (proxy != NULL) {
         const char * str;
         str = strchr(proxy, ':');
         if (str == NULL || strchr (str + 1, ':') != NULL) {
-            error = set_errno (ERR_OTHER, "Invalid format for SocksV5 WebSocket proxy");
+            set_errno (ERR_OTHER, "Invalid format for SocksV5 WebSocket proxy");
             return -1;
         }
         socks_v5_host = loc_alloc_zero(str - proxy + 1);
