@@ -267,7 +267,6 @@ static void device_register(const char * dev_cfg) {
     if (dev_url == NULL) return post_event_with_delay(device_register_cb, (void *)dev_cfg, 1000000);
 
     s = (const char *) dev_url;
-    printf ("s = X%sX", s);
     while (*s) {
         while (*s && *s != ';') s++;
         if (*s == ';') {
@@ -399,6 +398,7 @@ int main(int argc, char ** argv) {
                 exit(0);
                 break;
 
+            case 'd':
 #if defined(_WIN32) || defined(__CYGWIN__)
                 /* For Windows the only way to detach a process is to
                  * create a new process, so we patch the -d option to
