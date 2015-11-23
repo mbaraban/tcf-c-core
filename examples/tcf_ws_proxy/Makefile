@@ -3,7 +3,7 @@ TCF_AGENT_DIR := ../../agent
 include $(TCF_AGENT_DIR)/Makefile.inc
 
 TCF_WS_PROXY_ROOT_DIR = ../tcf_ws_proxy
-TCF_PROPRIETARY_ROOT_DIR = ../../proprietary/agent
+TCF_PROPRIETARY_ROOT_DIR = ../../wr_extensions/agent
 NOPOLL_VER=0.2.7.b164
 NOPOLL_DIR=$(BINDIR)/nopoll-$(NOPOLL_VER)
 NOPOLL_TAR=$(ROOT_DIR)/$(TCF_WS_PROXY_ROOT_DIR)/nopoll-$(NOPOLL_VER).tar.gz

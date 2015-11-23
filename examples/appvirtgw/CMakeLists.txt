@@ -7,8 +7,8 @@ set(CMAKE_COLOR_MAKEFILE OFF)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 set(TCF_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../..)
-set(TCF_PROPRIETARY_DIR ${TCF_DIR}/proprietary/agent)
-set(NOPOLL_DIR ${TCF_DIR}/proprietary/nopoll-0.2.7.b164)
+set(TCF_PROPRIETARY_DIR ${TCF_DIR}/wr_extensions/agent)
+set(NOPOLL_DIR ${TCF_DIR}/wr_extensions/nopoll-0.2.7.b164)
 set(TCF_LIB_NAME tcf-agent)
 
 if (NOT EXEC_NAME)
