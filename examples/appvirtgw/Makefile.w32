@@ -1,0 +1,69 @@
+# Makefile - Top level NMake Makefile for tcf-tools
+#
+# Copyright (c) 2012-2013 Wind River Systems, Inc.
+#
+# The right to copy, distribute, modify or otherwise make use
+# of this software may be licensed only pursuant to the terms
+# of an applicable Wind River license agreement.
+#
+
+# This is the top level NMake Makefile to build the host tools based on the TCF
+# technology.
+# To build, run:
+# 	nmake /f Makefile.w32 [DEBUG=0|1] [JOM=0|1] [BUILD_DIR=<path>]
+# It is possile to build with JOM support (https://qt.gitorious.org/qt-labs/jom)
+
+OUTDIR			= $(MAKEDIR)
+OBJDIR			= obj
+CD			= cd /d
+CP			= copy /y
+ALLOW_COMPILE_WARNINGS	= 0
+DEBUG			= 0
+JOM			= 0
+MAKEFILE		= Makefile.w32
+TCF_OPSYS		= Windows
+MACHINE			= i686
+EXEC_BITS		= 0
+EXEC_NAME               = appvirtgw
+
+
+CMAKE_GENERATOR	= "NMake Makefiles"
+
+!IF "$(CONF)" == "Debug"
+CMAKE_BUILD_TYPE	= Debug
+BUILD_TYPE		= debug
+!ELSE
+CMAKE_BUILD_TYPE= Release
+BUILD_TYPE		= release
+!ENDIF
+
+CMAKE_ARGS	= -G $(CMAKE_GENERATOR) \
+		  -DALLOW_COMPILE_WARNINGS=$(ALLOW_COMPILE_WARNINGS) \
+		  -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
+		  -DTCF_OPSYS=$(TCF_OPSYS) -DTCF_MACHINE=$(MACHINE) \
+                  -DEXEC_NAME=$(EXEC_NAME)
+!IF "$(DEVICE_SERVER_NAME)" != ""
+CMAKE_ARGS      = $(CMAKE_ARGS) -DDEVICE_SERVER_NAME="$(DEVICE_SERVER_NAME)"
+!ENDIF
+
+BUILD_DIR	= $(OUTDIR)\$(OBJDIR)\$(TCF_OPSYS)\$(BUILD_TYPE)
+
+# ------------------------------- default rule ------------------------------- #
+
+default: $(EXEC_NAME)
+
+.neverbuilt:
+
+$(BUILD_DIR)\Makefile: .neverbuilt $(MAKEFILE)
+	@IF NOT EXIST $(BUILD_DIR) MKDIR $(BUILD_DIR)
+	@ECHO Regenerating CMake build in "$(BUILD_DIR)"
+	($(CD) $(BUILD_DIR) && cmake $(CMAKE_ARGS) $(MAKEDIR))
+
+$(EXEC_NAME): .neverbuilt $(BUILD_DIR)\Makefile $(VS_REDIST)
+	($(CD) $(BUILD_DIR) && $(MAKE) $@)
+
+install: .neverbuilt $(EXEC_NAME) $(BUILD_DIR)\Makefile
+	($(CP) $(BUILD_DIR)\$(EXEC_NAME).exe $(INSTALLDIR)\$(EXEC_NAME).exe)
+
+rclean clean: .neverbuilt
+	@IF EXIST $(BUILD_DIR) RMDIR /S /Q $(BUILD_DIR)
