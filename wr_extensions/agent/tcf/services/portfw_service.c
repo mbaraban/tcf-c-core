@@ -803,7 +803,6 @@ static int serial_send_req_func(PortFwConfig * config, void * buffer, size_t len
                 return -1;
             }
         }
-        display_buffer((unsigned char *)buffer + total_write_count, write_count);
         total_write_count += write_count;
     } while ((int) total_write_count < length);
 
@@ -814,8 +813,6 @@ static int serial_send_req_func(PortFwConfig * config, void * buffer, size_t len
         ret = write(config->port_info.serial.fd, buffer, length);
     }
     while (ret < 0 && (errno == EINTR));
-
-    if (ret > 0) display_buffer((unsigned char *)buffer, ret);
 #endif
     return ret; 
 }
@@ -849,7 +846,6 @@ static int serial_recv_req_func(PortFwConfig * config, void * buffer, size_t len
              * Note that READ_THRESHOLD is also used to avoid buffer overflow.
              */
             if (max_bytes == 0 && total_read_count != 0) {
-                display_buffer((unsigned char *)buffer, total_read_count);
                 return total_read_count;
             }
 
@@ -914,7 +910,6 @@ static int serial_recv_req_func(PortFwConfig * config, void * buffer, size_t len
             }
         }
     }
-    display_buffer((unsigned char *)buffer, total_read_count);
     return total_read_count;
 #else
     int ret;
@@ -923,7 +918,6 @@ static int serial_recv_req_func(PortFwConfig * config, void * buffer, size_t len
         ret = read(config->port_info.serial.fd, buffer, length);
         }
     while (ret == 0 || (ret < 0 && (errno == EINTR)));
-    if (ret > 0) display_buffer((unsigned char *)buffer, ret);
     return ret;
 #endif
 }
@@ -1160,6 +1154,7 @@ static void done_recv_request(void * args) {
         return;
     }
     config->inbuf_len = rval;
+    if (rval > 0) display_buffer((unsigned char *)config->inbuf, rval);
     write_port_to_stream(config);
 }
 
@@ -1181,6 +1176,7 @@ static void done_send_request(void * args) {
         async_req_post(&config->send_req);
         return;
     }
+    if (rval > 0) display_buffer((unsigned char *)config->outbuf, rval);
     if (config->outbuf_len != rval) {
         memmove(config->outbuf, config->outbuf + rval, config->outbuf_len - rval);
         config->outbuf_len -= rval;
@@ -1366,20 +1362,20 @@ static void portfw_cmd_create(char * token, Channel * c) {
 
         trace(log_portfw, "Received connection request for port %s", config->port_config);
 
-        if (strncmp(config->port_config, "tcp:", strlen("tcp:")) == 0) {
+        if (strncasecmp(config->port_config, "tcp:", strlen("tcp:")) == 0) {
             channel_lock_with_msg(c, PortForward);
             config->port_type = PORTFW_TCP_PORT;
             snprintf (config->port_name, sizeof(config->port_name), "TCP port \"%s\"", config->port_config + strlen("tcp:"));
             if (config->verbose) fprintf(stdout, "Received connection request for %s\n", config->port_name);
             tcp_connect(config, connect_callback);
         }
-        else if (strncmp(config->port_config, "udp:", strlen("udp:")) == 0) {
+        else if (strncasecmp(config->port_config, "udp:", strlen("udp:")) == 0) {
             config->port_type = PORTFW_UDP_PORT;
             if (config->verbose) fprintf(stderr, "Unsupported protocol \"udp\"\n");
             err = EINVAL;
         }
 #if ENABLE_PortForward_Serial
-        else if (strncmp(config->port_config, "serial:", strlen("serial:")) == 0) {
+        else if (strncasecmp(config->port_config, "serial:", strlen("serial:")) == 0) {
             config->port_type = PORTFW_SER_PORT;
             snprintf (config->port_name, sizeof(config->port_name), "serial port \"%s\"", config->port_config + strlen("serial:"));
             if (config->verbose) fprintf(stdout, "Received connection request for %s\n", config->port_name);
@@ -1388,6 +1384,7 @@ static void portfw_cmd_create(char * token, Channel * c) {
         }
 #endif
         else {
+            if (config->verbose) fprintf(stderr, "Unsupported connection request for %s\n", config->port_config);
             err = EINVAL;
         }
    }
