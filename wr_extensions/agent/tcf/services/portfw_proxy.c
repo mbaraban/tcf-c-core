@@ -448,7 +448,12 @@ static void getcapabilities_cb(Channel * c, void * x, int error) {
             json_write_string(out, conn->id);
             while (attr != NULL) {
                 write_stream(out, ',');
-                json_write_string(out, attr->name);
+                if (strcmp(attr->name,  "RemotePort") == 0) {
+                    json_write_string(out, "Port");
+                }
+                else {
+                    json_write_string(out, attr->name);
+                }
                 write_stream(out, ':');
                 write_string(out, attr->value);
                 attr = attr->next;

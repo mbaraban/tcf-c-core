@@ -1323,8 +1323,8 @@ static void read_portfw_property(InputStream * inp, const char * name,
     else if (strcmp(name, "Config") == 0) config->port_config =
             json_read_alloc_string(inp);
     else if (strcmp(name, "Params") == 0) config->port_params = json_read_alloc_string(inp);
-    else if (strcmp(name, "Port") == 0) config->port =
-            (unsigned short) json_read_uint64(inp);
+    else if (strcmp(name, "Port") == 0 ||
+                strcmp(name,  "RemotePort") == 0) config->port = (unsigned short) json_read_uint64(inp);
     else if (strcmp(name, "AutoConnect") == 0) config->auto_connect = json_read_boolean(inp);
     else if (strcmp(name, "Verbose") == 0) config->verbose = json_read_boolean(inp);
     else json_skip_object(inp);
