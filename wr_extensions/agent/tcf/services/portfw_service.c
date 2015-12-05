@@ -680,7 +680,7 @@ static int serial_connect_req_func(void * reqdata) {
 #if defined(__linux__)
     struct serial_struct serial;
 #endif
-    int data_bits_const;
+    int data_bits_const = CS8;
 
     for (ix = 0; data_bit_table[ix].data_bits != 0; ix++)        {
         if (data_bit_table[ix].data_bits == info->serial.data_bits)
