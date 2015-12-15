@@ -250,10 +250,16 @@ static void device_register(const char * dev_cfg) {
             ((fp = fopen(dev_file, "r")) != NULL)) 
             {
             dev_url = loc_alloc_zero(st.st_size + 1);
-            fgets(dev_url, st.st_size, fp);
-            if (strlen(dev_url) == 0) {
+            if (fgets(dev_url, st.st_size, fp) == NULL || strlen(dev_url) == 0) {
                 loc_free(dev_url);
                 dev_url = NULL;
+            }
+            else {
+                size_t length = strlen(dev_url);
+                while (dev_url[length - 1] == '\n' || dev_url[length - 1] == '\r' || dev_url[length - 1] == ' ') {
+                    dev_url[length-1] = '\0';
+                    length--;
+                }
             }
         }
         if (fp != NULL) fclose(fp);
@@ -264,7 +270,15 @@ static void device_register(const char * dev_cfg) {
     }
     else dev_url = loc_strdup(dev_cfg);
 
-    if (dev_url == NULL) return post_event_with_delay(device_register_cb, (void *)dev_cfg, 1000000);
+    if (dev_url != NULL && strlen(dev_url) == 0) {
+        loc_free(dev_url);
+        dev_url = NULL;
+    }
+
+    if (dev_url == NULL) {
+        post_event_with_delay(device_register_cb, (void *)dev_cfg, 1000000);
+        return;
+    }
 
     s = (const char *) dev_url;
     while (*s) {
