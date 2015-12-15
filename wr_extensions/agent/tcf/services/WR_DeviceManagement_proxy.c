@@ -437,11 +437,11 @@ static void redir_connect_done(void * args, int error, Channel * c) {
 
     /* This is a redirection request */
     if (error) {
-        write_stringz(&c->out, "R");
-        write_stringz(&c->out, redir_args->token);
-        write_errno(&c->out, error);
-        write_stream(&c->out, 0);
-        write_stream(&c->out, MARKER_EOM);
+        write_stringz(&info->c1->out, "R");
+        write_stringz(&info->c1->out, redir_args->token);
+        write_errno(&info->c1->out, error);
+        write_stream(&info->c1->out, 0);
+        write_stream(&info->c1->out, MARKER_EOM);
     } else {
         info->redir_cnt ++;
         if (info->redir_cnt > info->redir_max) info->redir_max = info->redir_cnt;
