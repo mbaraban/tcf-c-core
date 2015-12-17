@@ -186,6 +186,10 @@ void           nopoll_ctx_unref (noPollCtx * ctx)
 	/* release all certificates buckets */
 	nopoll_free (ctx->certificates);
 
+        /* release proxy host and port */
+	nopoll_free ((noPollPtr) ctx->conn_proxy_host);
+	nopoll_free ((noPollPtr) ctx->conn_proxy_port);
+
 	/* release connection */
 	nopoll_free (ctx->conn_list);
 	ctx->conn_length = 0;

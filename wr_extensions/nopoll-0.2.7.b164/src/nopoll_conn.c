@@ -65,13 +65,29 @@ static const char * socks_v5_port;
  *
  * @param port SOCKS V5 proxy port number
  */
-void               nopoll_conn_set_socks_v5_proxy        (const char * host, 
+void               nopoll_conn_set_socks_v5_proxy        (
+                                                         noPollCtx * ctx,
+                                                         const char * host, 
                                                          const char * port)
 {
-	socks_v5_host = host;
-	socks_v5_port = port;
-        if (socks_v5_host != NULL && socks_v5_port == NULL) {
-                socks_v5_port = "1080";
+        const char * proxy_port = NULL;
+        const char * proxy_host = NULL;
+
+        if (host != NULL && strlen(host) != 0) proxy_host = strdup(host);
+        if (port != NULL && strlen(port) != 0) proxy_port = strdup(port);
+        if (proxy_host != NULL && proxy_port == NULL) {
+                proxy_port = strdup("1080");
+        }
+        if (ctx == NULL) {
+                nopoll_free((noPollPtr)socks_v5_host);
+                nopoll_free((noPollPtr)socks_v5_port);
+                socks_v5_host = proxy_host;
+                socks_v5_port = proxy_port;
+        } else {
+                nopoll_free((noPollPtr)ctx->conn_proxy_host);
+                nopoll_free((noPollPtr)ctx->conn_proxy_port);
+                ctx->conn_proxy_host = proxy_host;
+                ctx->conn_proxy_port = proxy_port;
         }
 }
 
@@ -260,9 +276,14 @@ NOPOLL_SOCKET nopoll_conn_sock_socks_v5_connect (noPollCtx   * ctx,
         int                  rval;
         int                  ix;
         uint16_t             sin_port;
+        const char *         proxy_host;
+        const char *         proxy_port;
+
+        proxy_port = ctx->conn_proxy_port == NULL ? socks_v5_port : ctx->conn_proxy_port;
+        proxy_host = ctx->conn_proxy_host == NULL ? socks_v5_host : ctx->conn_proxy_host;
 
 	/* resolve hosting name */
-	hostent = gethostbyname (socks_v5_host);
+	hostent = gethostbyname (proxy_host);
 	if (hostent == NULL) {
 		nopoll_log (ctx, NOPOLL_LEVEL_DEBUG, "unable to resolve host name %s", host);
 		return -1;
@@ -283,7 +304,7 @@ NOPOLL_SOCKET nopoll_conn_sock_socks_v5_connect (noPollCtx   * ctx,
         memset(&saddr, 0, sizeof(saddr));
 	saddr.sin_addr.s_addr = ((struct in_addr *)(hostent->h_addr))->s_addr;
         saddr.sin_family    = AF_INET;
-        saddr.sin_port      = htons((uint16_t) strtod (socks_v5_port, NULL));
+        saddr.sin_port      = htons((uint16_t) strtod (proxy_port, NULL));
 
 	/* set non blocking status */
 	nopoll_conn_set_sock_block (session, nopoll_false);
@@ -710,7 +731,7 @@ noPollConn * __nopoll_conn_new_common (noPollCtx       * ctx,
 	if (host_port == NULL)
 		host_port = "80";
 
-        if (socks_v5_host == NULL) {
+        if (socks_v5_host == NULL && ctx->conn_proxy_host == NULL) {
                 /* create socket connection in a non block manner */
                 session = nopoll_conn_sock_connect (ctx, host_ip, host_port);
                 if (session == NOPOLL_INVALID_SOCKET) {

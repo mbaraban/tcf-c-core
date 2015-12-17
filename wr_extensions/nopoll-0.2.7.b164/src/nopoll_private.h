@@ -80,6 +80,12 @@ struct _noPollCtx {
 	long        conn_connect_std_timeout;
 
 	/** 
+	 * @internal noPollConn connection proxy host and port.
+	 */
+	const char *    conn_proxy_host;
+	const char *    conn_proxy_port;
+
+	/** 
 	 * @internal Default listener connection backlog
 	 */
 	int         backlog;

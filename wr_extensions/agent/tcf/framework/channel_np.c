@@ -1007,7 +1007,7 @@ static void ini_nopoll() {
                     local_mutex_unlock);
 #if ENABLE_WebSocket_SOCKS_V5
     if (socks_v5_host != NULL) {
-        nopoll_conn_set_socks_v5_proxy(socks_v5_host, socks_v5_port);
+        nopoll_conn_set_socks_v5_proxy(NULL, socks_v5_host, socks_v5_port);
     }
 #endif
     np_poll_initialized = 1;
@@ -1169,6 +1169,9 @@ void channel_np_connect(PeerServer * ps, ChannelConnectCallBack callback, void *
     const char * port = peer_server_getprop(ps, "Port", NULL);
     const char * get_url = peer_server_getprop(ps, "GetUrl", NULL);
     const char * host_name = peer_server_getprop(ps, "HostName", NULL);
+#if ENABLE_WebSocket_SOCKS_V5
+    const char * proxy = peer_server_getprop(ps, "Proxy", NULL);
+#endif
     ChannelConnectInfo * info = NULL;
     char port_str[16];
     struct addrinfo hints;
@@ -1202,7 +1205,7 @@ void channel_np_connect(PeerServer * ps, ChannelConnectCallBack callback, void *
 
     if (!error && info->addr_buf == NULL) error = ENOENT;
     if (error) {
-            if (info != NULL) {
+        if (info != NULL) {
             loc_free(info->addr_buf);
             loc_free(info);
         }
@@ -1211,6 +1214,27 @@ void channel_np_connect(PeerServer * ps, ChannelConnectCallBack callback, void *
 	noPollCtx * np_ctx_client;
 	np_ctx_client = nopoll_ctx_new();
 	/*nopoll_log_enable(np_ctx_client, nopoll_true);*/
+#if ENABLE_WebSocket_SOCKS_V5
+        if (proxy != NULL) {
+            /* save global proxy values */
+            char * proxy_host = socks_v5_host;
+            char * proxy_port = socks_v5_port;
+            if (parse_socks_v5_proxy(proxy) != 0) {
+                socks_v5_host = proxy_host;
+                socks_v5_port = proxy_port;
+                if (info != NULL) {
+                    loc_free(info->addr_buf);
+                    loc_free(info);
+                }
+                callback(callback_args, errno, NULL);
+                return;
+            }
+            if (socks_v5_host != NULL) nopoll_conn_set_socks_v5_proxy(np_ctx_client, socks_v5_host, socks_v5_port);
+            /* Restore global proxy values */
+            socks_v5_host = proxy_host;
+            socks_v5_port = proxy_port;
+        }
+#endif
 
         info->callback = callback;
         info->callback_args = callback_args;
