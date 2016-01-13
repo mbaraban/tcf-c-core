@@ -1,6 +1,6 @@
 # cmake project to build nopoll library
 #
-# Copyright (c) 2015 Wind River Systems, Inc.
+# Copyright (c) 2015-2016 Wind River Systems, Inc.
 #
 # The right to copy, distribute, modify or otherwise make use
 # of this software may be licensed only pursuant to the terms
@@ -34,3 +34,7 @@ endif(MSVC)
 if(APPLE)
     add_definitions(-Wno-deprecated-declarations)
 endif(APPLE)
+
+if(CMAKE_COMPILER_IS_GNUCC)
+    remove_definitions(-Wmissing-prototypes -Wswitch-enum)
+endif(CMAKE_COMPILER_IS_GNUCC)
