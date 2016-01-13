@@ -370,7 +370,7 @@ static void channel_redir_connected(Channel * c) {
         }
         if (i != info->redir_cnt) break;
     }
-    if (info == NULL) return;
+    if (info == NULL || info->c1 == NULL) return;
     if (info->redir[i].redirected) return;
     info->redir[i].redirected = 1;
 
