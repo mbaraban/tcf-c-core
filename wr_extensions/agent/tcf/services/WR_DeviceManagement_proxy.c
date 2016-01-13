@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014 Wind River Systems, Inc.
+ * Copyright (c) 2013-2014, 2016 Wind River Systems, Inc.
  *
  * The right to copy, distribute, modify or otherwise make use
  * of this software may be licensed only pursuant to the terms
@@ -229,7 +229,7 @@ static void send_register_gateway_cmd(Channel * c, ConnectInfo * info) {
     json_write_string(&c->out, "Devices");
     write_stream(&c->out, ':');
     write_stream(&c->out, '[');
-    for (device = info->devices; *device != (char *)NULL; device++) {
+    for (device = info->devices; (device != NULL) && (*device != (char *)NULL); device++) {
         const char * s = *device;
         char * value;
         char * name;
@@ -615,7 +615,7 @@ int deviceRegister(const char * url, const char * user, const char * id, const c
 
 int gatewayRegister(const char * url, const char * id, const char ** devices) {
     ConnectInfo * info;
-    if (url == NULL || devices == NULL || devices[0] == NULL) {
+    if (url == NULL) {
         fprintf (stderr, "Usage: gatewayRegister(<gateway url>, <gateway id>, <devices>");
         return -1;
     }
