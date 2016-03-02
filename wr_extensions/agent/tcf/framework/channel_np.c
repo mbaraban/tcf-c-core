@@ -141,6 +141,12 @@ struct NpIOReq {
     char * error_msg;
 };
 
+typedef struct ChannelNPMutex ChannelNPMutex;
+struct ChannelNPMutex {
+    int count;
+    pthread_mutex_t pmutex;
+};
+
 #define channel2np(A)  ((ChannelNP *)((char *)(A) - offsetof(ChannelNP, chan)))
 #define inp2channel(A)  ((Channel *)((char *)(A) - offsetof(Channel, inp)))
 #define out2channel(A)  ((Channel *)((char *)(A) - offsetof(Channel, out)))
@@ -979,32 +985,40 @@ static void * local_mutex_init(void) {
 #ifdef PTHREAD_MUTEX_RECURSIVE
     pthread_mutexattr_t attr;
 #endif
-    pthread_mutex_t * mutex = loc_alloc(sizeof(pthread_mutex_t));
+    ChannelNPMutex * mutex = loc_alloc_zero(sizeof(ChannelNPMutex));
 #ifdef PTHREAD_MUTEX_RECURSIVE
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init (mutex, &attr);
+    pthread_mutex_init (&mutex->pmutex, &attr);
 #else
-    pthread_mutex_init (mutex, NULL);
+    pthread_mutex_init (&mutex->pmutex, NULL);
 #endif
     return mutex;
 }
 
 static void local_mutex_destroy (void * args) {
+    ChannelNPMutex * mutex = (ChannelNPMutex *)args;
     if (args == 0) return;
-    pthread_mutex_destroy((pthread_mutex_t *)args);
+    if (mutex->count != 0) return;
+    pthread_mutex_destroy(&mutex->pmutex);
     loc_free(args);
 }
 
 static void local_mutex_lock (void * args) {
+    ChannelNPMutex * mutex = (ChannelNPMutex *)args;
     if (args) {
-        pthread_mutex_lock((pthread_mutex_t *)args);
+        pthread_mutex_lock(&mutex->pmutex);
+        mutex->count++;
     }
 }
 
 static void local_mutex_unlock (void * args) {
+    ChannelNPMutex * mutex = (ChannelNPMutex *)args;
     if (args) {
-        pthread_mutex_unlock((pthread_mutex_t *)args);
+        if (mutex->count > 0) {
+            pthread_mutex_unlock(&mutex->pmutex);
+            mutex->count--;
+        }
     }
 }
 
