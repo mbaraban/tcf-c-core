@@ -549,12 +549,12 @@ nopoll_bool nopoll_base64_encode (const char  * content,
 	if ((*output_size) < (int) bptr->length) {
 		BIO_free_all (b64);
 
-		*output_size = bptr->length;
+		*output_size = (int)bptr->length;
 		return nopoll_false;
 	}
 
-	memcpy(output, bptr->data, bptr->length - 1);
-	output[bptr->length-1] = 0;
+	memcpy(output, bptr->data, (int)bptr->length - 1);
+	output[(int)bptr->length-1] = 0;
 
 	BIO_free_all (b64);
 
