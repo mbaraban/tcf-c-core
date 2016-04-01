@@ -38,8 +38,8 @@ DESCRIPTION
 
 /* defines */
 
-#define OUT_BUF_SIZE        32*1024
-#define IN_BUF_SIZE        32*1024
+#define OUT_BUF_SIZE            32*1024
+#define IN_BUF_SIZE             32*1024
 
 #define MAX_STREAM_WRITE        5       /* maximum number of parallel stream write commands */
 #define MAX_STREAM_READ         5       /* maximum number of parallel stream read commands */
@@ -58,6 +58,7 @@ struct PortServer {
     AsyncReqInfo accreq;
     int accept_in_progress;
     u_short local_port;
+    int is_udp;               /* local port is UDP */
     Channel *   channel;
     struct PortConnection * list;
     PortRedirectionInfo * redir_info;
@@ -68,6 +69,8 @@ struct PortServer {
     PortDisconnectCallback disconnect_callback;   /* disconnect hook */
     PortRecvCallback recv_callback;               /* receive hook */
     void * callback_data;
+    struct sockaddr  client_addr;    /* client address for UDP port */
+    socklen_t client_addr_len;    /* client address for UDP port */
 };
 
 typedef struct PortReadInfo {
@@ -115,7 +118,7 @@ static const char * channel_lock_svr_msg = "Port Forwarding server lock";
 /* forward declaration */
 
 static void set_socket_options(int sock);
-static PortServer * create_port_server(Channel * c, u_short port, PortRedirectionInfo * redir);
+static PortServer * create_port_server(Channel * c, PortRedirectionInfo * redir);
 static void port_connection_close(PortConnection * conn);
 static void port_server_shutdown(PortServer * server);
 static void ini_portforwarding(void);
@@ -573,6 +576,7 @@ static void send_packet_callback(PortConnection * conn, int error) {
     else {
         port_lock(conn);
         conn->recv_req.u.sio.sock = conn->fd;
+        conn->recv_req.u.sio.addrlen = sizeof(conn->server->client_addr);
         async_req_post(&conn->recv_req);
     }
 }
@@ -613,6 +617,8 @@ static void read_packet_callback(PortConnection * conn, int error, int idx,
             conn->send_req.u.sio.bufp = conn->read_buffer[idx];
             conn->send_req.u.sio.bufsz = conn->read_buffer_size[idx];
             conn->send_req.u.sio.sock = conn->fd;
+            conn->send_req.u.sio.addr = &conn->server->client_addr;
+            conn->send_req.u.sio.addrlen = conn->server->client_addr_len;
             async_req_post(&conn->send_req);
         }
         else {
@@ -628,7 +634,7 @@ static void port_connection_open_event(void * arg) {
     while (qp != qhp) {
         PortServer * server = link2server(qp);
         if (server == (PortServer *)arg) {
-            port_connection_open((PortServer *)arg, -1);
+            port_connection_open(server, server->is_udp ? server->sock : -1);
         }
         qp = qp->next;
     }
@@ -641,16 +647,22 @@ static int port_connection_bind(PortConnection * conn, int fd) {
     conn->recv_req.u.sio.sock = conn->fd;
     conn->send_in_progress = -1;
     conn->pending_send_req = 0;
+    conn->recv_req.u.sio.addrlen = sizeof(conn->server->client_addr);
+    conn->recv_req.u.sio.addr = &conn->server->client_addr;
     async_req_post(&conn->recv_req);
     return 0;
 }
 
 static int port_connection_unbind(PortConnection * conn) {
-    if (conn->fd != -1) {
+    /* In UDP mode, connection and server are sharing the same
+     * socket; do not close it when we close the connection, it
+     * will be closed when the server is closed.
+     */
+    if (conn->fd != -1 && conn->server->is_udp == 0) {
         shutdown(conn->fd, SHUT_RDWR);
         closesocket(conn->fd);
-        conn->fd = -1;
     }
+    conn->fd = -1;
     return 0;
 }
 
@@ -669,6 +681,8 @@ static void connect_port_callback(PortConnection * conn, int error) {
         if (conn->fd != -1) {
             port_lock(conn);
             conn->recv_req.u.sio.sock = conn->fd;
+            conn->recv_req.u.sio.addr = &conn->server->client_addr;
+            conn->recv_req.u.sio.addrlen = sizeof(conn->server->client_addr);
             async_req_post(&conn->recv_req);
         }
         /* Send multiple TCF streams read requests in parallel; this is
@@ -690,7 +704,10 @@ static void done_recv_request(void * args) {
     }
     if (req->u.sio.rval == 0
             || (req->u.sio.rval == -1 && req->error != EINTR)) {
-        if (conn->server->auto_connect) {
+        /* Check if we are in auto connect mode and server has not been
+         * shut down
+         */
+        if (conn->server->auto_connect && conn->server->sock != -1) {
             /* Client has disconnected; don't close the connection if we
              * are in auto connect mode but simply unbind the client from
              * the port.
@@ -701,6 +718,7 @@ static void done_recv_request(void * args) {
         return;
     }
     port_lock(conn);
+    conn->server->client_addr_len = req->u.sio.addrlen;
     send_packet(conn, req->u.sio.bufp, req->u.sio.rval);
 }
 
@@ -717,7 +735,10 @@ static void done_send_request(void * args) {
     }
     if (req->u.sio.rval == 0
            || (req->u.sio.rval == -1 && req->error != EINTR)) {
-        if (conn->server->auto_connect) {
+        /* Check if we are in auto connect mode and server has not been
+         * shut down
+         */
+        if (conn->server->auto_connect && conn->server->sock != -1) {
             /* Client has disconnected; don't close the connection if we
              * are in auto connect mode but simply unbind the client from
              * the port.
@@ -756,6 +777,8 @@ static void done_send_request(void * args) {
         conn->send_req.u.sio.bufsz = conn->read_buffer_size[next_idx];
         port_lock(conn);
         conn->send_req.u.sio.sock = conn->fd;
+        conn->send_req.u.sio.addr = &conn->server->client_addr;
+        conn->send_req.u.sio.addrlen = conn->server->client_addr_len;
         async_req_post(&conn->send_req);
     }
     read_packet(conn, idx);
@@ -767,7 +790,7 @@ static void port_connection_close(PortConnection * conn) {
 
     port_connection_unbind(conn);
     if (conn->connected) {
-    if (server->disconnect_callback) server->disconnect_callback(server, server->callback_data);
+        if (server->disconnect_callback) server->disconnect_callback(server, server->callback_data);
         disconnect_port(conn);
         conn->connected = 0;
         return;
@@ -815,15 +838,17 @@ static void port_connection_open(PortServer * server, int fd) {
         int idx = 0;
         conn->recv_req.client_data = conn;
         conn->recv_req.done = done_recv_request;
-        conn->recv_req.type = AsyncReqRecv;
+        conn->recv_req.type = server->is_udp ? AsyncReqRecvFrom : AsyncReqRecv;
         conn->recv_req.u.sio.sock = fd;
         conn->recv_req.u.sio.flags = 0;
         conn->recv_req.u.sio.bufp = conn->inbuf;
         conn->recv_req.u.sio.bufsz = IN_BUF_SIZE;
+        conn->recv_req.u.sio.addr = &server->client_addr;
+        conn->recv_req.u.sio.addrlen = sizeof(conn->server->client_addr);
 
         conn->send_req.client_data = conn;
         conn->send_req.done = done_send_request;
-        conn->send_req.type = AsyncReqSend;
+        conn->send_req.type = server->is_udp ? AsyncReqSendTo : AsyncReqSend;
         conn->send_req.u.sio.sock = fd;
         conn->send_req.u.sio.flags = 0;
 
@@ -920,9 +945,10 @@ static void port_server_shutdown(PortServer * server) {
     loc_free(server);
 }
 
-static PortServer * create_port_server(Channel * c, u_short port, PortRedirectionInfo * redir) {
+static PortServer * create_port_server(Channel * c, PortRedirectionInfo * redir) {
     int sock;
     struct sockaddr_in addr;
+    PortAttribute * attr = redir->attrs;
 #if defined(_WRS_KERNEL)
     int addrlen;
 #else
@@ -930,26 +956,42 @@ static PortServer * create_port_server(Channel * c, u_short port, PortRedirectio
 #endif
     u_short port_number;
     PortServer * server = NULL;
+    int is_udp = 0;           /* do we use a server UDP -or TCP- port? */
 
+    while (attr != NULL) {
+        if (strcmp(attr->name,  "Config") == 0) {
+            ByteArrayInputStream buf;
+            char * config;
+            InputStream * inp = create_byte_array_input_stream(&buf, attr->value, strlen(attr->value));
+            config = json_read_alloc_string(inp);
+            if (strncasecmp(config, "udp:", strlen("udp:")) == 0) {
+                is_udp = 1;
+            }
+            loc_free(config);
+            break;
+        }
+        attr = attr->next;
+    }
     memset((void *) &addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = (u_short) htons(port);
+    addr.sin_port = (u_short) htons(redir->local_port);
 
     sock = -1;
 
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) >= 0) set_socket_options(sock); /* set socket options */
+    if (is_udp) sock = socket(AF_INET, SOCK_DGRAM, 0);
+    else if ((sock = socket(AF_INET, SOCK_STREAM, 0)) >= 0) set_socket_options(sock); /* set socket options */
 
     if (sock == -1) return NULL ;
 
     if (bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-            if (port != 0) {
+        if (redir->local_port != 0) {
             memset((void *) &addr, 0, sizeof(addr));
             addr.sin_family = AF_INET;
             addr.sin_addr.s_addr = htonl(INADDR_ANY);
             addr.sin_port = (u_short) 0;
             if (bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-                    perror ("bind");
+                perror ("bind");
                 goto error;
             }
         } else {
@@ -958,7 +1000,9 @@ static PortServer * create_port_server(Channel * c, u_short port, PortRedirectio
         }
     }
 
-    if (listen(sock, 16) != 0) goto error;
+    if (!is_udp) {
+        if (listen(sock, 16) != 0) goto error;
+    }
 
     /* Get port property in case the default port could not be used or
      * the client specified a port that the system converts to a
@@ -969,6 +1013,7 @@ static PortServer * create_port_server(Channel * c, u_short port, PortRedirectio
 
     server = loc_alloc_zero(sizeof(PortServer));
     server->sock = sock;
+    server->is_udp = is_udp;
 #if defined(SOCK_MAXADDRLEN)
     server->addr_len = SOCK_MAXADDRLEN;
 #else
@@ -977,15 +1022,24 @@ static PortServer * create_port_server(Channel * c, u_short port, PortRedirectio
     server->addr_buf = (struct sockaddr *)loc_alloc(server->addr_len);
     server->local_port = port_number;
 
-    server->accept_in_progress = 1;
+    if (!server->is_udp) {
+        server->accept_in_progress = 1;
 
-    server->accreq.done = port_server_accept_done;
-    server->accreq.client_data = server;
-    server->accreq.type = AsyncReqAccept;
-    server->accreq.u.acc.sock = sock;
-    server->accreq.u.acc.addr = server->addr_buf;
-    server->accreq.u.acc.addrlen = server->addr_len;
-    async_req_post(&server->accreq);
+        server->accreq.done = port_server_accept_done;
+        server->accreq.client_data = server;
+        server->accreq.type = AsyncReqAccept;
+        server->accreq.u.acc.sock = sock;
+        server->accreq.u.acc.addr = server->addr_buf;
+        server->accreq.u.acc.addrlen = server->addr_len;
+        async_req_post(&server->accreq);
+        }
+    else
+        {
+        /* For UDP, automatically connect to the port since there is no
+         * connection request we can detect.
+         */
+        redir->auto_connect = 1;
+        }
 
     list_add_last(&server->link, &server_list);
     channel_lock_with_msg(server->channel = c, channel_lock_svr_msg);
@@ -1044,7 +1098,7 @@ PortServer * create_port_redirection(PortRedirectionInfo * port) {
         port->attrs = attr;
     }
 
-    server = create_port_server(port->c, (u_short) port->local_port, port);
+    server = create_port_server(port->c, port);
 
     if (server == NULL) {
         free_port_redirection_info(port);
@@ -1061,10 +1115,10 @@ PortServer * create_port_redirection(PortRedirectionInfo * port) {
         server->recv_callback = port->recv_callback;
         server->callback_data = port->callback_data;
         if (server->auto_connect) {
-            /* If auto connect mode is set, immediatly try to connect to the
+            /* If auto connect mode is set, immediately try to connect to the
              * port.
              */
-            port_connection_open(server, -1);
+            port_connection_open(server, server->is_udp ? server->sock : -1);
         }
         return server;
     }
@@ -1105,6 +1159,12 @@ static void write_port_server_info(OutputStream * out, PortServer * server) {
     json_write_string(out, "LocalPort");
     write_stream(out, ':');
     json_write_uint64(out, server->local_port);
+    if (server->is_udp) {
+        write_stream(out, ',');
+        json_write_string(out, "LocalPortIsUDP");
+        write_stream(out, ':');
+        json_write_boolean(out, server->is_udp);
+    }
     while (attr != NULL) {
         write_stream(out, ',');
         if (strcmp(attr->name,  "RemotePort") == 0) {

@@ -17,6 +17,7 @@
 #include <tcf/framework/mdep-inet.h>
 #include <tcf/framework/mdep-threads.h>
 #include <assert.h>
+#include <errno.h>
 #include <tcf/framework/myalloc.h>
 #include <tcf/framework/context.h>
 #include <tcf/services/portfw_service.h>
@@ -32,10 +33,19 @@
 
 #if defined(_WRS_KERNEL)
 #define ENABLE_PortForward_Serial       0
+#define ENABLE_PortForward_UDP          0
 #elif defined(WIN32)
 #define ENABLE_PortForward_Serial       1
+#define ENABLE_PortForward_UDP          0
 #else
 #define ENABLE_PortForward_Serial       1
+#define ENABLE_PortForward_UDP          1
+#endif
+
+#ifdef WIN32
+#ifndef ECONNREFUSED
+#define ECONNREFUSED    WSAECONNREFUSED
+#endif
 #endif
 
 #if ENABLE_PortForward_Serial
@@ -359,6 +369,99 @@ static int tcp_connect(PortFwConfig * config, ConnectCallBack callback) {
     loc_free(dev_string);
     return 0;
 }
+
+#if ENABLE_PortForward_UDP
+/* UDP PORT SUPPORT */
+static void udp_connect_done(void * args) {
+    PortFwConfig * config = (PortFwConfig *)((AsyncReqInfo *)args)->client_data;
+    PortConnectInfo * info = &config->port_info;
+
+    loc_free(info->cnct_req.u.con.addr);
+    if (info->cnct_req.error) {
+        info->cnct_callback(config, info->cnct_req.error);
+    }
+    else {
+        config->connected = 1;
+        info->cnct_callback(config, 0);
+    }
+}
+
+static int udp_connect(PortFwConfig * config, ConnectCallBack callback) {
+    int error = 0;
+    struct addrinfo hints;
+    struct addrinfo * reslist = NULL;
+    char * dev_string = loc_strdup(config->port_config);
+    struct sockaddr * addr_buf = NULL;
+    int addr_len;
+    int sock;
+    char * host_str;
+    char * port_str;
+
+    host_str = strchr(dev_string, ':');
+    if (host_str == NULL) {
+        error = EINVAL;
+    }
+    else {
+        host_str++;
+        port_str = strchr(host_str, ':');
+        if (port_str == NULL) {
+            error = EINVAL;
+        }
+    }
+    if (!error) {
+        port_str[0] = '\0';
+        port_str++;
+        if (strlen(host_str) == 0) host_str = NULL;
+    }
+    if (!error) {
+        memset(&hints, 0, sizeof hints);
+
+        hints.ai_family = PF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_protocol = IPPROTO_UDP;
+        error = loc_getaddrinfo(host_str, port_str, &hints, &reslist);
+        if (error) error = set_gai_errno(error);
+        if (!error) {
+            struct addrinfo * res;
+            for (res = reslist; res != NULL; res = res->ai_next) {
+                addr_len = res->ai_addrlen;
+                addr_buf = (struct sockaddr *)loc_alloc(res->ai_addrlen);
+                memcpy(addr_buf, res->ai_addr, res->ai_addrlen);
+                sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+                if (sock < 0) {
+                    error = errno;
+                }
+                else {
+                    error = 0;
+                    break;
+                }
+            }
+            loc_freeaddrinfo(reslist);
+        }
+    }
+    if (!error && addr_buf == NULL) error = ENOENT;
+    if (error) {
+        callback(config, error);
+    }
+    else {
+        PortConnectInfo * info = &config->port_info;
+        info->addr_buf = addr_buf;
+        info->addr_len = addr_len;
+        info->sock = sock;
+
+        info->cnct_callback = callback;
+        info->cnct_req.client_data = config;
+        info->cnct_req.done = udp_connect_done;
+        info->cnct_req.type = AsyncReqConnect;
+        info->cnct_req.u.con.sock = info->sock;
+        info->cnct_req.u.con.addr = info->addr_buf;
+        info->cnct_req.u.con.addrlen = info->addr_len;
+        async_req_post(&info->cnct_req);
+    }
+    loc_free(dev_string);
+    return 0;
+}
+#endif
 
 static void disconnect_port(PortFwConfig * config) {
     if (config->port_info.sock != -1) {
@@ -1145,8 +1248,10 @@ static void done_recv_request(void * args) {
     else rval = req->u.sio.rval;
 
     config->recv_in_progress = 0;
-    if (rval == 0 || (rval == -1 && req->error != EINTR)
-            || config->shutdown_in_progress) {
+    if (rval == 0
+        || ((rval == -1 && req->error != EINTR)
+            && (rval == -1 && (req->error != ECONNREFUSED || config->port_type != PORTFW_UDP_PORT)))
+        || config->shutdown_in_progress) {
         delete_config(config);
         return;
     }
@@ -1168,8 +1273,10 @@ static void done_send_request(void * args) {
     config->send_in_progress = 0;
     if (req->type == AsyncReqUser) rval = req->u.user.rval;
     else rval = req->u.sio.rval;
-    if (rval == 0 || (rval == -1 && req->error != EINTR)
-            || config->shutdown_in_progress) {
+    if (rval == 0
+        || ((rval == -1 && req->error != EINTR)
+            && (rval == -1 && (req->error != ECONNREFUSED || config->port_type != PORTFW_UDP_PORT)))
+        || config->shutdown_in_progress) {
         delete_config(config);
         return;
     }
@@ -1373,8 +1480,15 @@ static void portfw_cmd_create(char * token, Channel * c) {
         }
         else if (strncasecmp(config->port_config, "udp:", strlen("udp:")) == 0) {
             config->port_type = PORTFW_UDP_PORT;
+#if ENABLE_PortForward_UDP
+            channel_lock_with_msg(c, PortForward);
+            snprintf (config->port_name, sizeof(config->port_name), "UDP port \"%s\"", config->port_config + strlen("udp:"));
+            if (config->verbose) fprintf(stdout, "Received connection request for %s\n", config->port_name);
+            udp_connect(config, connect_callback);
+#else
             if (config->verbose) fprintf(stderr, "Unsupported protocol \"udp\"\n");
             err = EINVAL;
+#endif
         }
 #if ENABLE_PortForward_Serial
         else if (strncasecmp(config->port_config, "serial:", strlen("serial:")) == 0) {
@@ -1453,6 +1567,12 @@ static void portfw_cmd_get_capabilities(char * token, Channel * c) {
         write_stream(out,',');
 #if ENABLE_PortForward_Serial
         json_write_string(out, "Serial");
+        write_stream(out, ':');
+        json_write_boolean(out, 1);
+        write_stream(out,',');
+#endif /* ENABLE_PortForward_Serial */
+#if ENABLE_PortForward_UDP
+        json_write_string(out, "UDP");
         write_stream(out, ':');
         json_write_boolean(out, 1);
         write_stream(out,',');
