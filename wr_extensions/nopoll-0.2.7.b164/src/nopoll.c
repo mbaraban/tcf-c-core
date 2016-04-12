@@ -365,7 +365,7 @@ void        nopoll_sleep (long microseconds)
 	usleep (microseconds);
 	return;
 #elif defined(NOPOLL_OS_WIN32)
-	Sleep (microseconds / 1000);
+	Sleep ((microseconds < 1000 ? 1000 : microseconds) / 1000);
 	return;
 #endif
 }
