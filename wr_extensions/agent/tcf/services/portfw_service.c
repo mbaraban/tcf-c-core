@@ -854,20 +854,6 @@ static int serial_connect_req_func(void * reqdata) {
     return 0;
 }
 
-static void display_buffer(unsigned char * buffer, size_t size) {
-    if ((log_mode & log_portfw) && log_file) {
-        size_t i;
-        char tmp_buffer[256];
-        if (size > sizeof(tmp_buffer)) size = sizeof(tmp_buffer) - 1;
-        for (i = 0; i < size; i++) {
-            if (isprint(buffer[i])) tmp_buffer[i] = buffer[i];
-            else tmp_buffer[i] = '.';
-        }
-        tmp_buffer[i] = 0;
-        trace(log_portfw, tmp_buffer);
-    }
-}
-
 static int serial_send_req_func(PortFwConfig * config, void * buffer, size_t length) {
     int ret;
 #ifdef WIN32
@@ -1070,6 +1056,20 @@ static void serial_connect(PortFwConfig * config, ConnectCallBack callback) {
 }
 /* END SERIAL LINE SUPPORT */
 #endif /* ENABLE_PortForward_Serial */
+
+static void display_buffer(unsigned char * buffer, size_t size) {
+    if ((log_mode & log_portfw) && log_file) {
+        size_t i;
+        char tmp_buffer[256];
+        if (size > sizeof(tmp_buffer)) size = sizeof(tmp_buffer) - 1;
+        for (i = 0; i < size; i++) {
+            if (isprint(buffer[i])) tmp_buffer[i] = buffer[i];
+            else tmp_buffer[i] = '.';
+        }
+        tmp_buffer[i] = 0;
+        trace(log_portfw, tmp_buffer);
+    }
+}
 
 static void send_event_portfw_remote_config_added(PortFwConfig * config) {
     if (broadcast_group == NULL) return;
