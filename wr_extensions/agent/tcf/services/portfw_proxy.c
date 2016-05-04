@@ -876,6 +876,7 @@ static void port_server_accept_done(void * x) {
 }
 
 static void free_port_redirection_info(PortRedirectionInfo * redir) {
+    if (!redir) return;
     while (redir->attrs != NULL) {
         PortAttribute * attr = redir->attrs;
         redir->attrs = attr->next;
@@ -1019,6 +1020,7 @@ PortServer * create_port_redirection(PortRedirectionInfo * port) {
     assert (port->c != NULL);
 
     if (port == NULL || port->c == NULL) {
+        free_port_redirection_info(port);
         errno = EINVAL;
         return NULL;
     }
@@ -1045,6 +1047,7 @@ PortServer * create_port_redirection(PortRedirectionInfo * port) {
     server = create_port_server(port->c, (u_short) port->local_port, port);
 
     if (server == NULL) {
+        free_port_redirection_info(port);
         loc_free(server);
         return NULL;
     }
