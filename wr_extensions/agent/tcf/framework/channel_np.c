@@ -935,7 +935,15 @@ static int channel_np_wait_until_connection_ready(noPollConn * conn, int timeout
 static int np_wt_accept (void * args) {
     int rc;
     ServerNP * si = (ServerNP *)args;
+
     si->np_sock = nopoll_conn_accept (si->np_ctx, si->np_listener);
+    if (si->np_sock == NULL) {
+        /* nopoll library does not always set errno, in this case create 
+         * a fake one.
+         */
+        if (errno == 0) errno = EINVAL;
+        return -1;
+    }
 
     (void) nopoll_conn_set_sock_block(nopoll_conn_socket(si->np_sock), nopoll_false);
     rc = channel_np_wait_until_connection_ready(si->np_sock, 1000, si->is_ssl);
