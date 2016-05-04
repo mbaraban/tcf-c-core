@@ -31,6 +31,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <ctype.h>
+#if defined(__linux__)
+#include <poll.h>
+#endif
 #include <tcf/framework/mdep-threads.h>
 #include <tcf/framework/mdep-fs.h>
 #include <tcf/framework/mdep-inet.h>
@@ -869,15 +872,22 @@ static void server_close(ChannelServer * serv) {
 static int channel_np_wait_until_connection_ready(noPollConn * conn, int timeout, int is_ssl) {
         long int total_timeout = timeout;
         int socket = nopoll_conn_socket(conn);
-        struct timeval tv;
-        fd_set readfds;
-        fd_set writefds;
-        fd_set errorfds;
 
         /* check if the connection already finished its connection
            handshake */
         do {
             int rc;
+#if defined(__linux__)
+            struct pollfd ufd;
+            memset(&ufd, 0, sizeof ufd);
+            ufd.fd = socket;
+            ufd.events = POLLIN;
+            rc = poll(&ufd, 1, 10 * 1000);
+#else
+            struct timeval tv;
+            fd_set readfds;
+            fd_set writefds;
+            fd_set errorfds;
             FD_ZERO(&readfds);
             FD_ZERO(&writefds);
             FD_ZERO(&errorfds);
@@ -889,6 +899,7 @@ static int channel_np_wait_until_connection_ready(noPollConn * conn, int timeout
             /* Wait for some event to occur on file descriptor */
 
             rc = select(socket + 1, &readfds, &writefds, &errorfds, &tv);
+#endif
 
             if (rc == -1) break;
 
