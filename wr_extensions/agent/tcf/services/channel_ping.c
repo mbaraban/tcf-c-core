@@ -116,7 +116,7 @@ static void channel_ping_cb(Channel * channel, void * client_data, int error) {
 int add_channel_ping(Channel * channel, int period, int timeout, PingTimeoutCallBack cb, void * cb_data) {
     int i;
     int service_loc = 0;
-    int ini_channel_ping = 0;
+    static int ini_channel_ping = 0;
 
     if (find_channel(channel) != NULL) return -1;
 
