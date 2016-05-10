@@ -871,19 +871,19 @@ static void port_server_accept_done(void * x) {
     AsyncReqInfo * req = (AsyncReqInfo *) x;
     PortServer * server = (PortServer *) req->client_data;
 
-    if (server->sock < 0) {
-        /* Server closed. */
+    if (server->sock < 0 || req->error) {
+        /* Server closed or fatal error */
+        if (server->sock >= 0 && req->error) {
+            trace(LOG_ALWAYS, "Port Server accept failed for server %s: %s", server->id, errno_to_str(req->error));
+        }
         server->accept_in_progress = 0;
         port_server_shutdown(server);
         return;
     }
-    if (req->error) {
-        trace(LOG_ALWAYS, "Socket accept failed: %s", errno_to_str(req->error));
-    }
     else {
         int fd = req->u.acc.rval;
         set_socket_options(fd); /* set socket options */
-        trace (LOG_ALWAYS, "Accept done on server for server %s\n", server->id);
+        trace (LOG_ALWAYS, "Accept done on server for server %s", server->id);
 
         /* In auto connect mode, we accept only a single client for the
          * port.
