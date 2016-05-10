@@ -1016,8 +1016,8 @@ static void local_mutex_unlock (void * args) {
     ChannelNPMutex * mutex = (ChannelNPMutex *)args;
     if (args) {
         if (mutex->count > 0) {
-            pthread_mutex_unlock(&mutex->pmutex);
             mutex->count--;
+            pthread_mutex_unlock(&mutex->pmutex);
         }
     }
 }
