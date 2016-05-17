@@ -1150,13 +1150,14 @@ static int np_wt_connect(void * args) {
     
     if (info->is_ssl) {
         noPollConnOpts * opts = NULL;
+        opts = nopoll_conn_opts_new ();
 #ifdef _WRS_KERNEL
         /* For VxWorks SSL peer certificate verification does not work; let's
          * disable this for now.
          */
-        opts = nopoll_conn_opts_new ();
         nopoll_conn_opts_ssl_peer_verify (opts, nopoll_false);
 #endif
+	nopoll_conn_opts_set_ssl_protocol (opts, NOPOLL_METHOD_TLSV1_1);
         conn = nopoll_conn_tls_new (info->np_ctx, opts, info->host, info->port, NULL, info->get_url, info->host_name, NULL);
     } else conn = nopoll_conn_new (info->np_ctx, info->host, info->port, NULL, NULL, NULL, NULL);
 
