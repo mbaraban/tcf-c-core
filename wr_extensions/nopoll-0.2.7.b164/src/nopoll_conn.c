@@ -688,8 +688,12 @@ SSL_CTX * __nopoll_conn_get_ssl_context (noPollCtx * ctx, noPollConn * conn, noP
                 break;
 #endif
 	case NOPOLL_METHOD_SSLV3:
+#if !defined(OPENSSL_NO_SSL3_METHOD)
 		/* printf ("**** REPORTING SSLv3 ****\n"); */
 		return SSL_CTX_new (is_client ? SSLv3_client_method () : SSLv3_server_method ()); 
+#else
+                break;
+#endif
 	case NOPOLL_METHOD_SSLV23:
 		/* printf ("**** REPORTING SSLv23 ****\n"); */
 		return SSL_CTX_new (is_client ? SSLv23_client_method () : SSLv23_server_method ()); 
